@@ -1,0 +1,38 @@
+# Configuracion centralizada del microservicio de transacciones (ms-transacciones).
+
+server:
+  port: 8082
+
+seguridad:
+  # Clave del servicio (se exige en el header X-API-KEY)
+  api-key: transacciones-key-456
+  # JWT del servicio: firma HS256 con secreto propio y claim "servicio"
+  servicio: transacciones
+  jwt-secret: transacciones-secret-jwt-banco-xyz-ms-tr-256
+  jwt-expiracion-minutos: 30
+  # Usuarios del servicio: usuario:clave:PERMISO1,PERMISO2 separados por punto y coma.
+  usuarios: analista:an123:CONSULTA,REPORTES;cliente:cl123:CONSULTA
+
+ratelimit:
+  # Rate limiting del servicio: 60 solicitudes por minuto por cliente
+  capacidad: 60
+  ventana-segundos: 60
+
+# Circuit Breaker (Resilience4j) de las consultas a la base de datos legada
+resilience4j:
+  circuitbreaker:
+    instances:
+      persistencia-transacciones:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+
+# Grupo de consumidores propio: ms-transacciones recibe una copia de cada
+# evento del topico de retiros, independiente del grupo de ms-operaciones
+spring:
+  kafka:
+    consumer:
+      group-id: ms-transacciones

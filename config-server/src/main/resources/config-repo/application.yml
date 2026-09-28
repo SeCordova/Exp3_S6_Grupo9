@@ -1,0 +1,64 @@
+# Configuracion compartida por todos los microservicios del ecosistema bancario.
+# Se aplica a cualquier aplicacion que consuma este Config Server.
+
+# Conexion a la base de datos legada compartida (MySQL en Docker)
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/bank_legacy?serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      # El esquema ya existe en la base legada: no crear ni modificar tablas
+      ddl-auto: none
+  # Mensajeria asincrona (Kafka): broker local en Docker (docker-compose.yml).
+  # Solo aplica a los servicios con spring-kafka en el classpath
+  # (ms-operaciones como productor/consumidor y ms-transacciones como consumidor).
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # Entrega confiable: confirmacion de todas las replicas + productor idempotente
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Un consumidor nuevo lee el topico desde el inicio (reprocesamiento)
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: com.duoc.bank.common.event
+        spring.json.value.default.type: com.duoc.bank.common.event.RetiroRealizadoEvent
+
+# Registro en el servidor de descubrimiento de servicios (Eureka)
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+# Trazabilidad: incluye el requestId (header X-Request-ID) en cada linea de log
+logging:
+  pattern:
+    level: "%5p [%X{requestId}]"
+
+# Topico de la saga coreografiada de retiros
+eventos:
+  topico-retiros: retiros-realizados
+
+# Actuator: salud del servicio y estado de los circuit breakers (evidencia de resiliencia)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true

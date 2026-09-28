@@ -1,0 +1,86 @@
+# Configuracion centralizada del microservicio de operaciones (ms-operaciones).
+
+server:
+  port: 8083
+
+seguridad:
+  # Clave del servicio (se exige en el header X-API-KEY)
+  api-key: operaciones-key-789
+  # JWT del servicio: firma HS256 con secreto propio y claim "servicio"
+  servicio: operaciones
+  jwt-secret: operaciones-secret-jwt-banco-xyz-ms-op-256
+  jwt-expiracion-minutos: 30
+  # Usuarios del servicio: usuario:clave:PERMISO1,PERMISO2 separados por punto y coma.
+  # "operador" puede consultar y retirar; "consultor" solo consulta (demuestra el 403).
+  usuarios: operador:op123:CONSULTA,RETIRO;consultor:co123:CONSULTA
+
+ratelimit:
+  # Rate limiting del servicio: 30 solicitudes por minuto por cliente (servicio restringido)
+  capacidad: 30
+  ventana-segundos: 60
+
+# Integracion con ms-cuentas: el retiro se ejecuta llamando a sus endpoints
+# internos via Feign (descubrimiento por Eureka), autenticado con su api-key.
+integracion:
+  cuentas:
+    api-key: cuentas-key-123
+
+# Timeouts del cliente Feign hacia ms-cuentas
+feign:
+  client:
+    config:
+      ms-cuentas:
+        connectTimeout: 5000
+        readTimeout: 5000
+        loggerLevel: basic
+
+# Circuit Breakers (Resilience4j): llamadas a ms-cuentas, publicacion del
+# evento de retiro en Kafka y escritura local
+resilience4j:
+  circuitbreaker:
+    instances:
+      ms-cuentas:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # Los errores de negocio no son fallos del servicio: no abren el circuito
+        ignore-exceptions:
+          - com.duoc.bank.common.exception.CuentaNoEncontradaException
+          - com.duoc.bank.common.exception.SaldoInsuficienteException
+      publicacion-eventos:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      persistencia-operaciones:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+  # Reintentos ante fallos transitorios de ms-cuentas (se ejecutan antes de
+  # que el Circuit Breaker considere la llamada como fallida)
+  retry:
+    instances:
+      ms-cuentas:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - feign.RetryableException
+          - feign.FeignException
+        ignore-exceptions:
+          - com.duoc.bank.common.exception.CuentaNoEncontradaException
+          - com.duoc.bank.common.exception.SaldoInsuficienteException
+
+# Grupo de consumidores propio: ms-operaciones registra la operacion anual a
+# partir del evento de retiro, independiente del grupo de ms-transacciones
+spring:
+  kafka:
+    consumer:
+      group-id: ms-operaciones

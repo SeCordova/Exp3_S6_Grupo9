@@ -1,0 +1,36 @@
+# Configuracion centralizada del microservicio de cuentas (ms-cuentas).
+
+server:
+  port: 8081
+
+seguridad:
+  # Clave del servicio (se exige en el header X-API-KEY)
+  api-key: cuentas-key-123
+  # JWT del servicio: firma HS256 con secreto propio y claim "servicio"
+  servicio: cuentas
+  jwt-secret: cuentas-secret-jwt-banco-xyz-ms-cuentas-256
+  jwt-expiracion-minutos: 30
+  # Usuarios del servicio: usuario:clave:PERMISO1,PERMISO2 separados por punto y coma.
+  # "analista" puede consultar y ver estadisticas; "cliente" solo consulta.
+  usuarios: analista:an123:CONSULTA,REPORTES;cliente:cl123:CONSULTA
+
+ratelimit:
+  # Rate limiting del servicio: 120 solicitudes por minuto por cliente
+  capacidad: 120
+  ventana-segundos: 60
+
+# Circuit Breaker (Resilience4j) de las consultas a la base de datos legada
+resilience4j:
+  circuitbreaker:
+    instances:
+      persistencia-cuentas:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # Los errores de negocio no son fallos de persistencia: no abren el circuito
+        ignore-exceptions:
+          - com.duoc.bank.common.exception.CuentaNoEncontradaException
+          - com.duoc.bank.common.exception.SaldoInsuficienteException
